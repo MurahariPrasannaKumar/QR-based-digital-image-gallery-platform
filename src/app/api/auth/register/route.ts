@@ -4,8 +4,19 @@ import { db } from "@/lib/db";
 import { registerSchema } from "@/lib/validations";
 import { createVerificationToken } from "@/lib/verification-tokens";
 import { sendVerificationEmail } from "@/lib/mailer";
+import { RATE_LIMITS } from "@/lib/constants";
+import { rateLimit, getClientIp, rateLimitResponseInit } from "@/lib/rate-limit";
 
 export async function POST(req: NextRequest) {
+  const [limit, windowMs] = RATE_LIMITS.register;
+  const limitResult = rateLimit(`register:${getClientIp(req)}`, limit, windowMs);
+  if (!limitResult.success) {
+    return NextResponse.json(
+      { success: false, error: "Too many attempts. Please try again later." },
+      rateLimitResponseInit(limitResult)
+    );
+  }
+
   let body: unknown;
   try {
     body = await req.json();

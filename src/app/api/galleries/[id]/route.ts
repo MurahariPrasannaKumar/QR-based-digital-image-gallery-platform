@@ -5,6 +5,7 @@ import { auth } from "@/auth";
 import { requireGalleryOwner } from "@/lib/authorize";
 import { getOwnedGallery } from "@/lib/galleries";
 import { updateGallerySchema } from "@/lib/validations";
+import { imageStorage } from "@/lib/storage/r2-image-storage";
 
 export async function GET(_req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
   const session = await auth();
@@ -93,6 +94,10 @@ export async function DELETE(_req: NextRequest, ctx: { params: Promise<{ id: str
     );
   }
 
+  // Purge R2 objects first — if this fails partway, we still proceed with
+  // the DB delete rather than leaving a gallery the owner can't get rid of;
+  // any objects that failed to delete are logged and become orphans.
+  await imageStorage.deleteGalleryObjects(id);
   await db.gallery.delete({ where: { id } });
 
   return NextResponse.json({ success: true, data: { id } });

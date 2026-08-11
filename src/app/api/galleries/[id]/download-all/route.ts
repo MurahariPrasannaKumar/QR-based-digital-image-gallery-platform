@@ -1,9 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
+import { Readable } from "stream";
 import { auth } from "@/auth";
 import { db } from "@/lib/db";
-import { imageStorage } from "@/lib/storage/postgres-image-storage";
+import { imageStorage } from "@/lib/storage/r2-image-storage";
 import { hasGalleryAccess } from "@/lib/gallery-access";
-import { createZipBuffer, type ZipEntry } from "@/lib/zip";
+import { createZipStream, type ZipStreamEntry } from "@/lib/zip";
 
 // The dynamic segment is named `id` to match sibling routes, but the
 // value here is the gallery's public slug (used from the public gallery page).
@@ -35,11 +36,12 @@ export async function GET(_req: NextRequest, ctx: { params: Promise<{ id: string
     return NextResponse.json({ success: false, error: "This gallery has no images." }, { status: 400 });
   }
 
-  const entries: ZipEntry[] = [];
-  for (const meta of images) {
-    const full = await imageStorage.getImage(meta.id);
-    if (!full) continue; // skip missing/corrupt images rather than failing the whole archive
-    entries.push({ filename: full.originalName, data: full.data });
+  const streams = await Promise.all(images.map((meta) => imageStorage.getObjectStream(meta.id)));
+
+  const entries: ZipStreamEntry[] = [];
+  for (const obj of streams) {
+    if (!obj) continue; // skip missing/corrupt images rather than failing the whole archive
+    entries.push({ filename: obj.originalName, stream: obj.stream });
   }
 
   if (entries.length === 0) {
@@ -49,10 +51,10 @@ export async function GET(_req: NextRequest, ctx: { params: Promise<{ id: string
     );
   }
 
-  const zipBuffer = await createZipBuffer(entries);
+  const zipStream = createZipStream(entries);
   const zipFilename = `${gallery.name.replace(/[^a-z0-9-_ ]/gi, "").trim() || "gallery"}.zip`;
 
-  return new NextResponse(new Uint8Array(zipBuffer), {
+  return new NextResponse(Readable.toWeb(zipStream) as ReadableStream, {
     headers: {
       "Content-Type": "application/zip",
       "Content-Disposition": `attachment; filename="${encodeURIComponent(zipFilename)}"`,

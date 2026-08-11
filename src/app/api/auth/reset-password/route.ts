@@ -3,8 +3,19 @@ import bcrypt from "bcryptjs";
 import { db } from "@/lib/db";
 import { resetPasswordSchema } from "@/lib/validations";
 import { consumeVerificationToken } from "@/lib/verification-tokens";
+import { RATE_LIMITS } from "@/lib/constants";
+import { rateLimit, getClientIp, rateLimitResponseInit } from "@/lib/rate-limit";
 
 export async function POST(req: NextRequest) {
+  const [limit, windowMs] = RATE_LIMITS.resetPassword;
+  const limitResult = rateLimit(`reset-password:${getClientIp(req)}`, limit, windowMs);
+  if (!limitResult.success) {
+    return NextResponse.json(
+      { success: false, error: "Too many attempts. Please try again later." },
+      rateLimitResponseInit(limitResult)
+    );
+  }
+
   let body: unknown;
   try {
     body = await req.json();

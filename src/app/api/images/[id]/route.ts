@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { db } from "@/lib/db";
-import { imageStorage } from "@/lib/storage/postgres-image-storage";
+import { imageStorage } from "@/lib/storage/r2-image-storage";
 import { hasGalleryAccess } from "@/lib/gallery-access";
 import { requireImageOwner } from "@/lib/authorize";
 
@@ -26,16 +26,17 @@ export async function GET(_req: NextRequest, ctx: { params: Promise<{ id: string
     );
   }
 
-  const image = await imageStorage.getImage(id);
-  if (!image) {
+  const url = await imageStorage.getViewUrl(id);
+  if (!url) {
     return NextResponse.json({ success: false, error: "Image not found." }, { status: 404 });
   }
 
-  return new NextResponse(new Uint8Array(image.data), {
-    headers: {
-      "Content-Type": image.mimeType,
-      "Cache-Control": "private, max-age=31536000, immutable",
-    },
+  // Redirect rather than proxy — the actual bytes are served straight from
+  // R2 (or its CDN edge, for the public-URL fast path), not through this
+  // function. Short-lived signed URLs are never cached by shared caches.
+  return NextResponse.redirect(url, {
+    status: 302,
+    headers: { "Cache-Control": "private, no-store" },
   });
 }
 

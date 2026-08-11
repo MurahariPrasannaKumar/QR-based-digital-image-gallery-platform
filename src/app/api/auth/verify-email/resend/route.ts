@@ -3,11 +3,22 @@ import { auth } from "@/auth";
 import { db } from "@/lib/db";
 import { createVerificationToken } from "@/lib/verification-tokens";
 import { sendVerificationEmail } from "@/lib/mailer";
+import { RATE_LIMITS } from "@/lib/constants";
+import { rateLimit, rateLimitResponseInit } from "@/lib/rate-limit";
 
 export async function POST() {
   const session = await auth();
   if (!session?.user) {
     return NextResponse.json({ success: false, error: "Unauthorized." }, { status: 401 });
+  }
+
+  const [limit, windowMs] = RATE_LIMITS.resendVerification;
+  const limitResult = rateLimit(`resend-verification:${session.user.id}`, limit, windowMs);
+  if (!limitResult.success) {
+    return NextResponse.json(
+      { success: false, error: "Too many attempts. Please try again later." },
+      rateLimitResponseInit(limitResult)
+    );
   }
 
   const user = await db.user.findUnique({

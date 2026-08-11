@@ -62,7 +62,7 @@ model Image {
   originalName String
   mimeType     String
   fileSize     Int
-  data         Bytes
+  storageKey   String   @unique
   width        Int?
   height       Int?
   sortOrder    Int      @default(0)

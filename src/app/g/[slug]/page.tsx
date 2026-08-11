@@ -4,7 +4,7 @@ import type { Metadata } from "next";
 import { ArrowLeft } from "lucide-react";
 import { getPublicGalleryBySlug } from "@/lib/public-gallery";
 import { hasGalleryAccess } from "@/lib/gallery-access";
-import { imageStorage } from "@/lib/storage/postgres-image-storage";
+import { imageStorage } from "@/lib/storage/r2-image-storage";
 import { PasswordGate } from "@/components/gallery/password-gate";
 import { PublicGalleryGrid } from "@/components/gallery/public-gallery-grid";
 import { ShareButton } from "@/components/shared/share-button";

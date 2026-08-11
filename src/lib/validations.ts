@@ -53,6 +53,41 @@ export const reorderImagesSchema = z.object({
   imageIds: z.array(z.string()).min(1),
 });
 
+const presignFileSchema = z.object({
+  originalName: z.string().trim().min(1).max(255),
+  mimeType: z.enum(ALLOWED_IMAGE_TYPES),
+  fileSize: z
+    .number()
+    .int()
+    .positive()
+    .max(MAX_IMAGE_SIZE, "This image is larger than 5 MB."),
+});
+
+export const presignUploadSchema = z.object({
+  files: z.array(presignFileSchema).min(1).max(50),
+});
+
+export type PresignUploadInput = z.infer<typeof presignUploadSchema>;
+
+const confirmFileSchema = z.object({
+  storageKey: z.string().trim().min(1),
+  originalName: z.string().trim().min(1).max(255),
+  mimeType: z.enum(ALLOWED_IMAGE_TYPES),
+  fileSize: z
+    .number()
+    .int()
+    .positive()
+    .max(MAX_IMAGE_SIZE, "This image is larger than 5 MB."),
+  width: z.number().int().positive().nullable().optional(),
+  height: z.number().int().positive().nullable().optional(),
+});
+
+export const confirmUploadSchema = z.object({
+  files: z.array(confirmFileSchema).min(1).max(50),
+});
+
+export type ConfirmUploadInput = z.infer<typeof confirmUploadSchema>;
+
 export const forgotPasswordSchema = z.object({
   email: z.string().trim().email("Enter a valid email address"),
 });

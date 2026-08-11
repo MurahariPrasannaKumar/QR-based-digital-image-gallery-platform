@@ -3,8 +3,19 @@ import { db } from "@/lib/db";
 import { forgotPasswordSchema } from "@/lib/validations";
 import { createVerificationToken } from "@/lib/verification-tokens";
 import { sendPasswordResetEmail } from "@/lib/mailer";
+import { RATE_LIMITS } from "@/lib/constants";
+import { rateLimit, getClientIp, rateLimitResponseInit } from "@/lib/rate-limit";
 
 export async function POST(req: NextRequest) {
+  const [limit, windowMs] = RATE_LIMITS.forgotPassword;
+  const limitResult = rateLimit(`forgot-password:${getClientIp(req)}`, limit, windowMs);
+  if (!limitResult.success) {
+    return NextResponse.json(
+      { success: false, error: "Too many attempts. Please try again later." },
+      rateLimitResponseInit(limitResult)
+    );
+  }
+
   let body: unknown;
   try {
     body = await req.json();

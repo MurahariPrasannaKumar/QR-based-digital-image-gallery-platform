@@ -2,7 +2,7 @@ import { notFound } from "next/navigation";
 import type { Metadata } from "next";
 import { requireUser } from "@/lib/session";
 import { getOwnedGallery } from "@/lib/galleries";
-import { imageStorage } from "@/lib/storage/postgres-image-storage";
+import { imageStorage } from "@/lib/storage/r2-image-storage";
 import { GalleryHeader } from "@/components/gallery/gallery-header";
 import { GallerySettingsForm } from "@/components/gallery/gallery-settings-form";
 import { ManageImageGrid } from "@/components/gallery/manage-image-grid";

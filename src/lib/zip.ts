@@ -1,28 +1,22 @@
 import { ZipArchive } from "archiver";
-import { PassThrough } from "stream";
+import type { Readable } from "stream";
 
-export interface ZipEntry {
+export interface ZipStreamEntry {
   filename: string;
-  data: Buffer;
+  stream: Readable;
 }
 
 /**
- * Builds a ZIP archive in memory. Duplicate filenames are disambiguated
- * so the archive never silently overwrites an entry.
+ * Builds a ZIP archive as a readable stream — each entry is streamed
+ * straight from its source into the archive rather than being buffered
+ * whole in memory first, so a full gallery's worth of images never has
+ * to fit in memory at once.
+ *
+ * The returned Archiver is itself a Node readable stream (it extends
+ * stream.Transform), ready to pipe into a response.
  */
-export async function createZipBuffer(entries: ZipEntry[]): Promise<Buffer> {
+export function createZipStream(entries: ZipStreamEntry[]): Readable {
   const archive = new ZipArchive({ zlib: { level: 9 } });
-  const stream = new PassThrough();
-  const chunks: Buffer[] = [];
-
-  stream.on("data", (chunk) => chunks.push(chunk));
-
-  const done = new Promise<Buffer>((resolve, reject) => {
-    stream.on("end", () => resolve(Buffer.concat(chunks)));
-    archive.on("error", reject);
-  });
-
-  archive.pipe(stream);
 
   const usedNames = new Set<string>();
   for (const entry of entries) {
@@ -37,9 +31,9 @@ export async function createZipBuffer(entries: ZipEntry[]): Promise<Buffer> {
       counter++;
     }
     usedNames.add(name);
-    archive.append(entry.data, { name });
+    archive.append(entry.stream, { name });
   }
 
-  await archive.finalize();
-  return done;
+  void archive.finalize();
+  return archive;
 }

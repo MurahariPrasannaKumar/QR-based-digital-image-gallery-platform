@@ -1,6 +1,11 @@
 import type { NextAuthConfig } from "next-auth";
 
 export const authConfig = {
+  // Required on Vercel (and other platforms without a static AUTH_URL) —
+  // the platform's edge network sets the Host header correctly and
+  // terminates TLS itself, so trusting it here is safe. Without this,
+  // Auth.js rejects every request in production with "UntrustedHost".
+  trustHost: true,
   session: { strategy: "jwt" },
   pages: {
     signIn: "/login",
