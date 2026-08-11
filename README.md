@@ -257,16 +257,33 @@ upload-confirm time, since gallery state can change between presign and confirm)
    password-protected galleries never use this — they always get a short-lived signed URL
    regardless. If you skip this, everything still works — public galleries just also use
    signed URLs instead of the public path.
-4. **R2 → Manage API tokens → Create API token.** Choose "Object Read & Write", scope it to
+4. **R2 → your bucket → Settings → CORS Policy — required.** Uploads happen directly from the
+   browser to R2 (a different origin than your app), so without a CORS policy the browser
+   will block the upload `PUT` request even though the presigned URL itself is valid. Add:
+   ```json
+   [
+     {
+       "AllowedOrigins": ["https://your-production-domain.com", "http://localhost:3000"],
+       "AllowedMethods": ["PUT", "GET", "HEAD"],
+       "AllowedHeaders": ["*"],
+       "ExposeHeaders": ["ETag"],
+       "MaxAgeSeconds": 3600
+     }
+   ]
+   ```
+   Replace `https://your-production-domain.com` with your real deployed domain (add your
+   Vercel preview-deployment domain too if you test uploads from preview branches). Keep the
+   `localhost:3000` entry so local development keeps working.
+5. **R2 → Manage API tokens → Create API token.** Choose "Object Read & Write", scope it to
    your bucket. This gives you an **Access Key ID** and **Secret Access Key** — copy both
    immediately (the secret is shown once).
-5. Your **Account ID** is shown on the R2 overview page (or any zone's overview page) in the
+6. Your **Account ID** is shown on the R2 overview page (or any zone's overview page) in the
    right sidebar.
-6. Fill in `.env` (or Vercel's environment variables):
+7. Fill in `.env` (or Vercel's environment variables):
    ```bash
    R2_ACCOUNT_ID="<your account id>"
-   R2_ACCESS_KEY_ID="<the access key id from step 4>"
-   R2_SECRET_ACCESS_KEY="<the secret access key from step 4>"
+   R2_ACCESS_KEY_ID="<the access key id from step 5>"
+   R2_SECRET_ACCESS_KEY="<the secret access key from step 5>"
    R2_BUCKET_NAME="qr-gallery-images"
    R2_PUBLIC_URL="https://<your r2.dev or custom domain>"   # optional, see step 3
    ```
