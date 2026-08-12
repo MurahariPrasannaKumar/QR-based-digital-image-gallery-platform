@@ -4,7 +4,10 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
+import { confirmPasswordReset } from "firebase/auth";
 import { Loader2 } from "lucide-react";
+import { getFirebaseAuth } from "@/lib/firebase/client";
+import { firebaseErrorMessage } from "@/lib/firebase/errors";
 import { resetPasswordSchema, type ResetPasswordInput } from "@/lib/validations";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -17,33 +20,24 @@ import {
   FormMessage,
 } from "@/components/ui/form";
 
-export function ResetPasswordForm({ token }: { token: string }) {
+export function ResetPasswordForm({ oobCode }: { oobCode: string }) {
   const router = useRouter();
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const form = useForm<ResetPasswordInput>({
     resolver: zodResolver(resetPasswordSchema),
-    defaultValues: { token, password: "", confirmPassword: "" },
+    defaultValues: { password: "", confirmPassword: "" },
   });
 
   async function onSubmit(values: ResetPasswordInput) {
     setError(null);
     setIsSubmitting(true);
     try {
-      const res = await fetch("/api/auth/reset-password", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(values),
-      });
-      const json = await res.json();
-      if (!res.ok || !json.success) {
-        setError(json.error ?? "Something went wrong. Please try again.");
-        return;
-      }
+      await confirmPasswordReset(getFirebaseAuth(), oobCode, values.password);
       router.push("/login");
-    } catch {
-      setError("Something went wrong. Please try again.");
+    } catch (err) {
+      setError(firebaseErrorMessage(err));
     } finally {
       setIsSubmitting(false);
     }

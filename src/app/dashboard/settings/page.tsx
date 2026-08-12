@@ -1,7 +1,7 @@
 import Link from "next/link";
 import type { Metadata } from "next";
 import { requireUser } from "@/lib/session";
-import { db } from "@/lib/db";
+import { getAdminAuth } from "@/lib/firebase/admin";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
@@ -12,11 +12,10 @@ export const metadata: Metadata = { title: "Settings" };
 
 export default async function SettingsPage() {
   const user = await requireUser();
-  const account = await db.user.findUnique({
-    where: { id: user.id },
-    select: { emailVerified: true },
-  });
-  const isVerified = !!account?.emailVerified;
+  // Fetched fresh from Firebase rather than trusting the session cookie's
+  // cached claim, since that claim only refreshes when the cookie is reissued.
+  const account = await getAdminAuth().getUser(user.id);
+  const isVerified = account.emailVerified;
 
   return (
     <div className="max-w-lg space-y-6">

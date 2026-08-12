@@ -1,24 +1,24 @@
 import { NextRequest, NextResponse } from "next/server";
 import bcrypt from "bcryptjs";
 import { db } from "@/lib/db";
-import { auth } from "@/auth";
+import { getCurrentUser } from "@/lib/session";
 import { generateUniqueSlug } from "@/lib/slug";
 import { createGallerySchema } from "@/lib/validations";
 import { listGalleriesForUser } from "@/lib/galleries";
 
 export async function GET() {
-  const session = await auth();
-  if (!session?.user) {
+  const user = await getCurrentUser();
+  if (!user) {
     return NextResponse.json({ success: false, error: "Unauthorized." }, { status: 401 });
   }
 
-  const galleries = await listGalleriesForUser(session.user.id);
+  const galleries = await listGalleriesForUser(user.id);
   return NextResponse.json({ success: true, data: galleries });
 }
 
 export async function POST(req: NextRequest) {
-  const session = await auth();
-  if (!session?.user) {
+  const user = await getCurrentUser();
+  if (!user) {
     return NextResponse.json({ success: false, error: "Unauthorized." }, { status: 401 });
   }
 
@@ -41,7 +41,7 @@ export async function POST(req: NextRequest) {
 
   const gallery = await db.gallery.create({
     data: {
-      userId: session.user.id,
+      userId: user.id,
       name,
       description: description || null,
       slug,

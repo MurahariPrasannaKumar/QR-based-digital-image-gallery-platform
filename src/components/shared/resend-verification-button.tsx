@@ -2,7 +2,9 @@
 
 import { useState } from "react";
 import { toast } from "sonner";
+import { sendEmailVerification } from "firebase/auth";
 import { Loader2, MailWarning } from "lucide-react";
+import { getFirebaseAuth } from "@/lib/firebase/client";
 import { Button } from "@/components/ui/button";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 
@@ -13,12 +15,12 @@ export function ResendVerificationButton() {
   async function handleResend() {
     setIsSending(true);
     try {
-      const res = await fetch("/api/auth/verify-email/resend", { method: "POST" });
-      const json = await res.json();
-      if (!res.ok || !json.success) {
-        toast.error(json.error ?? "Failed to send verification email.");
+      const user = getFirebaseAuth().currentUser;
+      if (!user) {
+        toast.error("You need to be signed in.");
         return;
       }
+      await sendEmailVerification(user, { url: `${window.location.origin}/login` });
       setSent(true);
       toast.success("Verification email sent.");
     } catch {

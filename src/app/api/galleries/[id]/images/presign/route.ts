@@ -1,20 +1,20 @@
 import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@/auth";
+import { getCurrentUser } from "@/lib/session";
 import { db } from "@/lib/db";
 import { requireGalleryOwner } from "@/lib/authorize";
-import { imageStorage } from "@/lib/storage/r2-image-storage";
+import { imageStorage } from "@/lib/storage/supabase-image-storage";
 import { presignUploadSchema } from "@/lib/validations";
 import { MAX_GALLERY_SIZE, MAX_IMAGES_PER_GALLERY, RATE_LIMITS } from "@/lib/constants";
 import { rateLimit, rateLimitResponseInit } from "@/lib/rate-limit";
 
 export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
-  const session = await auth();
-  if (!session?.user) {
+  const user = await getCurrentUser();
+  if (!user) {
     return NextResponse.json({ success: false, error: "Unauthorized." }, { status: 401 });
   }
 
   const [limit, windowMs] = RATE_LIMITS.uploadPresign;
-  const limitResult = rateLimit(`upload-presign:${session.user.id}`, limit, windowMs);
+  const limitResult = rateLimit(`upload-presign:${user.id}`, limit, windowMs);
   if (!limitResult.success) {
     return NextResponse.json(
       { success: false, error: "Too many upload requests. Please slow down and try again shortly." },
@@ -27,7 +27,7 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
   // Never trust a gallery id from the client without checking ownership —
   // this is what stops an attacker from requesting upload URLs for
   // someone else's gallery by guessing/enumerating ids.
-  const gallery = await requireGalleryOwner(id, session.user.id);
+  const gallery = await requireGalleryOwner(id, user.id);
   if (!gallery) {
     return NextResponse.json(
       { success: false, error: "You don't have permission to perform this action." },

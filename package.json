@@ -10,8 +10,7 @@
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate dev",
     "db:deploy": "prisma migrate deploy",
-    "db:studio": "prisma studio",
-    "migrate:bytea-to-r2": "tsx scripts/migrate-bytea-to-r2.mjs"
+    "db:studio": "prisma studio"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1107.0",
@@ -27,12 +26,12 @@
     "bcryptjs": "^3.0.3",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
+    "firebase": "^12.4.0",
+    "firebase-admin": "^13.6.0",
     "framer-motion": "^13.1.0",
     "lucide-react": "^1.31.0",
     "next": "16.3.0",
-    "next-auth": "^5.0.0-beta.32",
     "next-themes": "^0.4.6",
-    "nodemailer": "^9.0.5",
     "pg": "^8.23.0",
     "prisma": "^7.9.1",
     "qrcode": "^1.5.4",
@@ -49,7 +48,6 @@
     "@tailwindcss/postcss": "^4",
     "@types/archiver": "^8.0.0",
     "@types/node": "^20",
-    "@types/nodemailer": "^8.0.1",
     "@types/pg": "^8.21.0",
     "@types/qrcode": "^1.5.6",
     "@types/react": "^19",
@@ -58,7 +56,6 @@
     "eslint": "^9",
     "eslint-config-next": "16.3.0",
     "tailwindcss": "^4",
-    "tsx": "^4.23.12",
     "typescript": "^5"
   }
 }

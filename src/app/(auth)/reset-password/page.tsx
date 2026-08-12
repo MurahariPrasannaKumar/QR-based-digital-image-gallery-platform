@@ -10,11 +10,11 @@ export const metadata: Metadata = { title: "Set New Password" };
 export default async function ResetPasswordPage({
   searchParams,
 }: {
-  searchParams: Promise<{ token?: string }>;
+  searchParams: Promise<{ oobCode?: string }>;
 }) {
-  const { token } = await searchParams;
+  const { oobCode } = await searchParams;
 
-  if (!token) {
+  if (!oobCode) {
     return (
       <Card>
         <CardHeader className="items-center text-center">
@@ -42,7 +42,7 @@ export default async function ResetPasswordPage({
         <CardDescription>Choose a new password for your account.</CardDescription>
       </CardHeader>
       <CardContent>
-        <ResetPasswordForm token={token} />
+        <ResetPasswordForm oobCode={oobCode} />
       </CardContent>
     </Card>
   );

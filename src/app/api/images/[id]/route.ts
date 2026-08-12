@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@/auth";
+import { getCurrentUser } from "@/lib/session";
 import { db } from "@/lib/db";
-import { imageStorage } from "@/lib/storage/r2-image-storage";
+import { imageStorage } from "@/lib/storage/supabase-image-storage";
 import { hasGalleryAccess } from "@/lib/gallery-access";
 import { requireImageOwner } from "@/lib/authorize";
 
@@ -41,13 +41,13 @@ export async function GET(_req: NextRequest, ctx: { params: Promise<{ id: string
 }
 
 export async function DELETE(_req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
-  const session = await auth();
-  if (!session?.user) {
+  const user = await getCurrentUser();
+  if (!user) {
     return NextResponse.json({ success: false, error: "Unauthorized." }, { status: 401 });
   }
 
   const { id } = await ctx.params;
-  const owned = await requireImageOwner(id, session.user.id);
+  const owned = await requireImageOwner(id, user.id);
   if (!owned) {
     return NextResponse.json(
       { success: false, error: "You don't have permission to perform this action." },
@@ -67,11 +67,11 @@ async function isAuthorizedForGallery(gallery: {
   if (gallery.isPublic) return true;
   if (await hasGalleryAccess(gallery.id)) return true;
 
-  const session = await auth();
-  if (!session?.user) return false;
+  const user = await getCurrentUser();
+  if (!user) return false;
 
   const owned = await db.gallery.findFirst({
-    where: { id: gallery.id, userId: session.user.id },
+    where: { id: gallery.id, userId: user.id },
     select: { id: true },
   });
   return !!owned;

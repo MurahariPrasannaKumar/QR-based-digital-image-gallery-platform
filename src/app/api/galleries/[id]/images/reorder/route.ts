@@ -1,17 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@/auth";
+import { getCurrentUser } from "@/lib/session";
 import { db } from "@/lib/db";
 import { requireGalleryOwner } from "@/lib/authorize";
 import { reorderImagesSchema } from "@/lib/validations";
 
 export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
-  const session = await auth();
-  if (!session?.user) {
+  const user = await getCurrentUser();
+  if (!user) {
     return NextResponse.json({ success: false, error: "Unauthorized." }, { status: 401 });
   }
 
   const { id } = await ctx.params;
-  const gallery = await requireGalleryOwner(id, session.user.id);
+  const gallery = await requireGalleryOwner(id, user.id);
   if (!gallery) {
     return NextResponse.json(
       { success: false, error: "You don't have permission to perform this action." },

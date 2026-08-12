@@ -3,7 +3,9 @@
 import { useState } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
+import { sendPasswordResetEmail } from "firebase/auth";
 import { Loader2, MailCheck } from "lucide-react";
+import { getFirebaseAuth } from "@/lib/firebase/client";
 import { forgotPasswordSchema, type ForgotPasswordInput } from "@/lib/validations";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -30,22 +32,21 @@ export function ForgotPasswordForm() {
     setError(null);
     setIsSubmitting(true);
     try {
-      const res = await fetch("/api/auth/forgot-password", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(values),
+      await sendPasswordResetEmail(getFirebaseAuth(), values.email, {
+        url: `${window.location.origin}/login`,
       });
-      const json = await res.json();
-      if (!res.ok || !json.success) {
-        setError(json.error ?? "Something went wrong. Please try again.");
+    } catch (err) {
+      // Don't leak whether the email is registered — "user not found" is
+      // still reported to the UI as success, same as before.
+      const code = (err as { code?: string } | null)?.code;
+      if (code !== "auth/user-not-found") {
+        setError("Something went wrong. Please try again.");
+        setIsSubmitting(false);
         return;
       }
-      setSent(true);
-    } catch {
-      setError("Something went wrong. Please try again.");
-    } finally {
-      setIsSubmitting(false);
     }
+    setSent(true);
+    setIsSubmitting(false);
   }
 
   if (sent) {

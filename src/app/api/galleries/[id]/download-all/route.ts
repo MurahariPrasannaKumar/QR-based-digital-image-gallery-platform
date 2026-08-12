@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { Readable } from "stream";
-import { auth } from "@/auth";
+import { getCurrentUser } from "@/lib/session";
 import { db } from "@/lib/db";
-import { imageStorage } from "@/lib/storage/r2-image-storage";
+import { imageStorage } from "@/lib/storage/supabase-image-storage";
 import { hasGalleryAccess } from "@/lib/gallery-access";
 import { createZipStream, type ZipStreamEntry } from "@/lib/zip";
 
@@ -21,8 +21,8 @@ export async function GET(_req: NextRequest, ctx: { params: Promise<{ id: string
 
   let authorized = gallery.isPublic || (await hasGalleryAccess(gallery.id));
   if (!authorized) {
-    const session = await auth();
-    authorized = session?.user?.id === gallery.userId;
+    const user = await getCurrentUser();
+    authorized = user?.id === gallery.userId;
   }
   if (!authorized) {
     return NextResponse.json(

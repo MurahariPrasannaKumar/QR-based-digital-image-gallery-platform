@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@/auth";
+import { getCurrentUser } from "@/lib/session";
 import { db } from "@/lib/db";
-import { imageStorage } from "@/lib/storage/r2-image-storage";
+import { imageStorage } from "@/lib/storage/supabase-image-storage";
 import { hasGalleryAccess } from "@/lib/gallery-access";
 
 export async function GET(_req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
@@ -19,10 +19,10 @@ export async function GET(_req: NextRequest, ctx: { params: Promise<{ id: string
 
   let authorized = meta.gallery.isPublic || (await hasGalleryAccess(meta.gallery.id));
   if (!authorized) {
-    const session = await auth();
-    if (session?.user) {
+    const user = await getCurrentUser();
+    if (user) {
       const owned = await db.gallery.findFirst({
-        where: { id: meta.gallery.id, userId: session.user.id },
+        where: { id: meta.gallery.id, userId: user.id },
         select: { id: true },
       });
       authorized = !!owned;

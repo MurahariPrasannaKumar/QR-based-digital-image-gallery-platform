@@ -4,8 +4,10 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { signIn } from "next-auth/react";
+import { createUserWithEmailAndPassword, sendEmailVerification, updateProfile } from "firebase/auth";
 import { Loader2 } from "lucide-react";
+import { getFirebaseAuth } from "@/lib/firebase/client";
+import { firebaseErrorMessage } from "@/lib/firebase/errors";
 import { registerSchema, type RegisterInput } from "@/lib/validations";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -32,33 +34,39 @@ export function RegisterForm() {
     setError(null);
     setIsSubmitting(true);
     try {
-      const res = await fetch("/api/auth/register", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(values),
-      });
-      const json = await res.json();
+      const credential = await createUserWithEmailAndPassword(
+        getFirebaseAuth(),
+        values.email,
+        values.password
+      );
+      await updateProfile(credential.user, { displayName: values.name });
 
-      if (!res.ok || !json.success) {
-        setError(json.error ?? "Something went wrong. Please try again.");
-        return;
+      try {
+        await sendEmailVerification(credential.user, {
+          url: `${window.location.origin}/login`,
+        });
+      } catch (err) {
+        // Don't fail registration if the email couldn't be sent — the user
+        // can still request a new verification email later from settings.
+        console.error("Failed to send verification email:", err);
       }
 
-      const result = await signIn("credentials", {
-        email: values.email,
-        password: values.password,
-        redirect: false,
+      // Re-fetch the ID token so it carries the displayName we just set.
+      const idToken = await credential.user.getIdToken(true);
+      const res = await fetch("/api/auth/session", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ idToken }),
       });
-
-      if (!result || result.error) {
+      if (!res.ok) {
         router.push("/login");
         return;
       }
 
       router.push("/dashboard");
       router.refresh();
-    } catch {
-      setError("Something went wrong. Please try again.");
+    } catch (err) {
+      setError(firebaseErrorMessage(err));
     } finally {
       setIsSubmitting(false);
     }

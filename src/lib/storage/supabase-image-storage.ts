@@ -7,7 +7,7 @@ import {
 } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { db } from "@/lib/db";
-import { getR2Client, getR2BucketName } from "@/lib/storage/r2-client";
+import { getSupabaseStorageClient, getSupabaseBucketName } from "@/lib/storage/supabase-client";
 import type {
   ImageStorage,
   ImageMetadata,
@@ -96,14 +96,14 @@ function toMetadata(row: MetadataRow): ImageMetadata {
   };
 }
 
-class R2ImageStorage implements ImageStorage {
+class SupabaseImageStorage implements ImageStorage {
   async saveImage(input: SaveImageInput): Promise<ImageMetadata> {
     const storageKey = buildStorageKey(input.galleryId, input.mimeType);
-    const client = getR2Client();
+    const client = getSupabaseStorageClient();
 
     await client.send(
       new PutObjectCommand({
-        Bucket: getR2BucketName(),
+        Bucket: getSupabaseBucketName(),
         Key: storageKey,
         Body: input.data,
         ContentType: input.mimeType,
@@ -134,9 +134,9 @@ class R2ImageStorage implements ImageStorage {
     });
     if (!row?.storageKey) return null;
 
-    const client = getR2Client();
+    const client = getSupabaseStorageClient();
     const res = await client.send(
-      new GetObjectCommand({ Bucket: getR2BucketName(), Key: row.storageKey })
+      new GetObjectCommand({ Bucket: getSupabaseBucketName(), Key: row.storageKey })
     );
     const data = await streamToBuffer(res.Body as Readable);
 
@@ -169,10 +169,10 @@ class R2ImageStorage implements ImageStorage {
 
   async createUploadTarget(input: CreateUploadTargetInput): Promise<UploadTarget> {
     const storageKey = buildStorageKey(input.galleryId, input.mimeType);
-    const client = getR2Client();
+    const client = getSupabaseStorageClient();
 
     const command = new PutObjectCommand({
-      Bucket: getR2BucketName(),
+      Bucket: getSupabaseBucketName(),
       Key: storageKey,
       ContentType: input.mimeType,
       ContentLength: input.fileSize,
@@ -205,12 +205,12 @@ class R2ImageStorage implements ImageStorage {
 
   async deleteStorageObject(storageKey: string): Promise<void> {
     try {
-      const client = getR2Client();
-      await client.send(new DeleteObjectCommand({ Bucket: getR2BucketName(), Key: storageKey }));
+      const client = getSupabaseStorageClient();
+      await client.send(new DeleteObjectCommand({ Bucket: getSupabaseBucketName(), Key: storageKey }));
     } catch (err) {
       // Best-effort — a failed cleanup leaves an orphaned object, not a
       // correctness problem, so we log rather than throw.
-      console.error(`Failed to delete R2 object "${storageKey}":`, err);
+      console.error(`Failed to delete Supabase Storage object "${storageKey}":`, err);
     }
   }
 
@@ -222,19 +222,19 @@ class R2ImageStorage implements ImageStorage {
     if (!row?.storageKey) return null;
 
     // The public-URL fast path is only safe for images in a public gallery.
-    // R2 doesn't support per-object ACLs — if R2_PUBLIC_URL is configured,
-    // the whole bucket is reachable at that domain — so handing out a
-    // durable, unsigned link for a private/password-protected gallery's
-    // image would defeat its access control entirely. Private images
-    // always get a short-lived signed URL instead, regardless of this
-    // setting.
-    const publicBase = process.env.R2_PUBLIC_URL;
+    // Supabase Storage buckets are either fully public or fully private —
+    // there are no per-object ACLs — so if SUPABASE_PUBLIC_URL is
+    // configured, the whole bucket is reachable at that domain. Handing out
+    // a durable, unsigned link for a private/password-protected gallery's
+    // image would defeat its access control entirely. Private images always
+    // get a short-lived signed URL instead, regardless of this setting.
+    const publicBase = process.env.SUPABASE_PUBLIC_URL;
     if (publicBase && row.gallery.isPublic) {
       return `${publicBase.replace(/\/$/, "")}/${row.storageKey}`;
     }
 
-    const client = getR2Client();
-    const command = new GetObjectCommand({ Bucket: getR2BucketName(), Key: row.storageKey });
+    const client = getSupabaseStorageClient();
+    const command = new GetObjectCommand({ Bucket: getSupabaseBucketName(), Key: row.storageKey });
     return getSignedUrl(client, command, { expiresIn: VIEW_URL_TTL_SECONDS });
   }
 
@@ -245,10 +245,10 @@ class R2ImageStorage implements ImageStorage {
     });
     if (!row?.storageKey) return null;
 
-    const client = getR2Client();
+    const client = getSupabaseStorageClient();
     const filename = sanitizeFilenameForHeader(row.originalName);
     const command = new GetObjectCommand({
-      Bucket: getR2BucketName(),
+      Bucket: getSupabaseBucketName(),
       Key: row.storageKey,
       ResponseContentDisposition: `attachment; filename="${filename}"`,
       ResponseContentType: row.mimeType,
@@ -265,9 +265,9 @@ class R2ImageStorage implements ImageStorage {
     });
     if (!row?.storageKey) return null;
 
-    const client = getR2Client();
+    const client = getSupabaseStorageClient();
     const res = await client.send(
-      new GetObjectCommand({ Bucket: getR2BucketName(), Key: row.storageKey })
+      new GetObjectCommand({ Bucket: getSupabaseBucketName(), Key: row.storageKey })
     );
 
     return {
@@ -279,4 +279,4 @@ class R2ImageStorage implements ImageStorage {
   }
 }
 
-export const imageStorage: ImageStorage = new R2ImageStorage();
+export const imageStorage: ImageStorage = new SupabaseImageStorage();

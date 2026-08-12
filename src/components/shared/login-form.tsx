@@ -5,8 +5,10 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { signIn } from "next-auth/react";
+import { signInWithEmailAndPassword } from "firebase/auth";
 import { Eye, EyeOff, Loader2 } from "lucide-react";
+import { getFirebaseAuth } from "@/lib/firebase/client";
+import { firebaseErrorMessage } from "@/lib/firebase/errors";
 import { loginSchema, type LoginInput } from "@/lib/validations";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -45,21 +47,27 @@ export function LoginForm() {
     setError(null);
     setIsSubmitting(true);
     try {
-      const result = await signIn("credentials", {
-        email: values.email,
-        password: values.password,
-        redirect: false,
-      });
+      const credential = await signInWithEmailAndPassword(
+        getFirebaseAuth(),
+        values.email,
+        values.password
+      );
+      const idToken = await credential.user.getIdToken();
 
-      if (!result || result.error) {
-        setError("Invalid email or password.");
+      const res = await fetch("/api/auth/session", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ idToken }),
+      });
+      if (!res.ok) {
+        setError("Something went wrong. Please try again.");
         return;
       }
 
       router.push(getSafeCallbackUrl(searchParams.get("callbackUrl")));
       router.refresh();
-    } catch {
-      setError("Something went wrong. Please try again.");
+    } catch (err) {
+      setError(firebaseErrorMessage(err));
     } finally {
       setIsSubmitting(false);
     }

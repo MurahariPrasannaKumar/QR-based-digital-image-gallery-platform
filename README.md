@@ -4,17 +4,19 @@ Create a photo gallery, upload JPG/PNG images, and get a shareable QR code and l
 Visitors scan the code and view or download the photos instantly — no account required.
 
 Designed to run for **$0/month** as an MVP: [Vercel](https://vercel.com) (hosting) +
-[Neon](https://neon.tech) (Postgres) + [Cloudflare R2](https://developers.cloudflare.com/r2/)
-(image storage) all have free tiers generous enough for a small app.
+[Neon](https://neon.tech) (Postgres, gallery/image metadata) +
+[Supabase Storage](https://supabase.com/storage) (image files) +
+[Firebase Authentication](https://firebase.google.com/products/auth) (accounts) all have free
+tiers generous enough for a small app.
 
 ## Features
 
 **Creators**
-- Register / log in with a secure, hashed password (bcrypt)
-- Email verification and password reset, delivered over SMTP (nodemailer)
+- Register / log in via Firebase Authentication (email + password)
+- Email verification and password reset, sent by Firebase itself — no SMTP to configure
 - Create galleries with a name, description, and visibility (public or password-protected)
-- Drag-and-drop image uploader — files go **directly from the browser to R2** via presigned
-  URLs, with client + server validation and upload progress
+- Drag-and-drop image uploader — files go **directly from the browser to Supabase Storage**
+  via presigned URLs, with client + server validation and upload progress
 - Manage a gallery: rename, edit description, add/remove images, reorder via drag-and-drop,
   change visibility, set or change a password, delete the gallery
 - Unique, collision-resistant gallery slug and public URL generated automatically
@@ -33,15 +35,14 @@ Designed to run for **$0/month** as an MVP: [Vercel](https://vercel.com) (hostin
 
 - [Next.js](https://nextjs.org) (App Router, Turbopack) + TypeScript + React
 - [Tailwind CSS](https://tailwindcss.com) + [shadcn/ui](https://ui.shadcn.com) (built on [Base UI](https://base-ui.com)) + [Lucide](https://lucide.dev) icons
-- [Prisma](https://www.prisma.io) + PostgreSQL (via `@prisma/adapter-pg`) — metadata only
-- [Cloudflare R2](https://developers.cloudflare.com/r2/) via `@aws-sdk/client-s3` / `@aws-sdk/s3-request-presigner` — image binary storage
-- [Auth.js (NextAuth v5)](https://authjs.dev) with a Credentials provider
+- [Prisma](https://www.prisma.io) + PostgreSQL (via `@prisma/adapter-pg`) — gallery/image metadata only
+- [Supabase Storage](https://supabase.com/storage) (S3-compatible) via `@aws-sdk/client-s3` / `@aws-sdk/s3-request-presigner` — image binary storage
+- [Firebase Authentication](https://firebase.google.com/products/auth) — accounts, sessions, email verification, password reset (client SDK + Admin SDK)
 - [Zod](https://zod.dev) + [React Hook Form](https://react-hook-form.com)
 - [qrcode](https://www.npmjs.com/package/qrcode) for QR generation
 - [archiver](https://www.npmjs.com/package/archiver) for streamed ZIP downloads
 - [@dnd-kit](https://dndkit.com) for drag-and-drop image reordering
 - [Framer Motion](https://www.framer.com/motion/) for the lightbox transition
-- [Nodemailer](https://nodemailer.com) for SMTP email (verification + password reset)
 
 ## Architecture
 
@@ -55,20 +56,21 @@ Vercel / Next.js (App Router)
    │
    ├──────────────► Neon PostgreSQL          (users, galleries, image metadata, tokens)
    │
-   └──────────────► Cloudflare R2            (actual JPG/PNG binaries)
+   └──────────────► Supabase Storage         (actual JPG/PNG binaries)
 ```
 
 **PostgreSQL stores metadata only.** The `Image` table has no binary column — instead a
-`storageKey` string points at the object in R2 (e.g. `galleries/{galleryId}/{uuid}.jpg`).
-Metadata queries never touch image bytes, so listing a 50-image gallery is a handful of KB,
-not tens of MB.
+`storageKey` string points at the object in Supabase Storage (e.g.
+`galleries/{galleryId}/{uuid}.jpg`). Metadata queries never touch image bytes, so listing a
+50-image gallery is a handful of KB, not tens of MB.
 
-**Uploads go straight from the browser to R2.** The Next.js server never sees the file bytes:
+**Uploads go straight from the browser to Supabase Storage.** The Next.js server never sees
+the file bytes:
 
 ```
 Browser → POST /api/galleries/[id]/images/presign  (auth + ownership + limits checked)
         ← presigned PUT URL(s)
-Browser → PUT directly to R2                        (bytes never touch the server)
+Browser → PUT directly to Supabase Storage           (bytes never touch the server)
 Browser → POST /api/galleries/[id]/images/confirm    (re-validated, writes DB metadata)
 ```
 
@@ -76,28 +78,32 @@ This keeps upload requests off Vercel Function bodies/duration entirely and avoi
 request size limits for large batches of images.
 
 **Downloads and viewing redirect, they don't proxy.** `GET /api/images/[id]` and
-`GET /api/images/[id]/download` do the authorization check, then `302` to either R2's public
-URL (public galleries, if `R2_PUBLIC_URL` is configured) or a short-lived presigned URL
-(private/password-protected galleries, and always for forced downloads — the presigned URL
-carries a `Content-Disposition` override so the original filename survives without the bytes
-passing through a function). `GET /api/galleries/[slug]/download-all` streams a ZIP by piping
-each R2 object directly into the archive, so a 100 MB gallery is never fully buffered in memory.
+`GET /api/images/[id]/download` do the authorization check, then `302` to either the bucket's
+public URL (public galleries, if `SUPABASE_PUBLIC_URL` is configured) or a short-lived
+presigned URL (private/password-protected galleries, and always for forced downloads — the
+presigned URL carries a `Content-Disposition` override so the original filename survives
+without the bytes passing through a function). `GET /api/galleries/[slug]/download-all`
+streams a ZIP by piping each object directly into the archive, so a 100 MB gallery is never
+fully buffered in memory.
 
 **Image storage is behind an abstraction** (`src/lib/storage/image-storage.ts`), currently
-implemented by `r2-image-storage.ts`. Nothing in the UI or gallery logic talks to R2 directly
-— everything goes through `ImageStorage` (`createUploadTarget()` / `confirmUpload()` /
-`getViewUrl()` / `getDownloadUrl()` / `getObjectStream()` / `deleteImage()` /
-`deleteGalleryObjects()` / `getGalleryImages()`). Swapping in S3, Cloudinary, or another
+implemented by `supabase-image-storage.ts`. Nothing in the UI or gallery logic talks to
+Supabase Storage directly — everything goes through `ImageStorage` (`createUploadTarget()` /
+`confirmUpload()` / `getViewUrl()` / `getDownloadUrl()` / `getObjectStream()` / `deleteImage()`
+/ `deleteGalleryObjects()` / `getGalleryImages()`). Swapping in S3, R2, Cloudinary, or another
 provider later means writing one new class against that interface — no route or component
 changes.
 
-**Authentication** uses Auth.js with a Credentials provider and JWT sessions (no separate
-session table). Passwords are hashed with bcrypt (12 rounds). Because Prisma's Node-only
-driver adapter can't run in the Edge runtime, the app splits the NextAuth config into
-`src/auth.config.ts` (Edge-safe, used by `src/proxy.ts` to protect `/dashboard/*`) and
-`src/auth.ts` (full config with the Credentials provider, used by API routes and Server
-Components). Every route that touches Prisma, R2, or Nodemailer runs on the Node.js runtime
-(the Next.js default) — none of them declare `export const runtime = "edge"`.
+**Authentication uses Firebase Authentication**, not a Postgres-backed Credentials flow.
+Sign-in/sign-up/password-reset/email-verification happen directly between the browser and
+Firebase via the client SDK (`src/lib/firebase/client.ts`) — the Next.js server never sees a
+password. After Firebase signs a user in, the browser exchanges a freshly-issued ID token for
+an httpOnly session cookie (`POST /api/auth/session`, backed by the Admin SDK's
+`createSessionCookie`) that the server verifies on every request (`src/lib/session.ts`,
+`getCurrentUser()`/`requireUser()`). Postgres holds no user table at all — `Gallery.userId`
+is just the Firebase UID string, with no foreign key. `/dashboard/*` is protected at the
+layout level (`requireUser()` redirects to `/login`), not via edge middleware, since the
+Admin SDK's Node.js dependencies aren't Edge-runtime-safe.
 
 **Authorization** is re-checked on every mutating request — `src/lib/authorize.ts` loads a
 gallery or image only if it belongs to the authenticated user, and every API route uses it
@@ -110,17 +116,21 @@ includes the upload flow: a presigned URL can only be requested for a gallery yo
 (`src/lib/gallery-access.ts`) scoped to a single gallery, set only after the password is
 verified server-side with bcrypt. The password hash is never sent to the client.
 
-**Email verification & password reset** use single-use, expiring tokens stored in the
-`VerificationToken` table (`src/lib/verification-tokens.ts`) — 24h for email verification,
-1h for password reset. Requesting a new token invalidates any outstanding one of the same
-type, and consuming a token deletes it, so links can't be replayed. The forgot-password
-endpoint always returns the same response whether or not the email is registered, to avoid
-leaking which addresses have accounts.
+**Email verification & password reset are entirely Firebase's.** `sendEmailVerification()` /
+`sendPasswordResetEmail()` (client SDK) trigger Firebase's own email delivery — no SMTP
+provider to configure. The emailed links point back into this app (`/verify-email` and
+`/reset-password`, each reading Firebase's `oobCode` query param and calling
+`applyActionCode()` / `confirmPasswordReset()`) rather than Firebase's generic hosted pages —
+this requires setting a custom **Action URL** in the Firebase Console (see
+[Firebase Authentication Setup](#firebase-authentication-setup)). `sendPasswordResetEmail()`
+throwing `auth/user-not-found` is still reported to the UI as success, to avoid leaking which
+emails are registered.
 
 **Rate limiting** (`src/lib/rate-limit.ts`) is an in-memory fixed-window limiter applied to
-`/api/auth/register`, `/api/auth/forgot-password`, `/api/auth/reset-password`,
-`/api/auth/verify-email/resend`, and the upload `presign`/`confirm` endpoints. It's
-per-serverless-instance, not distributed — see [Limitations](#limitations).
+the upload `presign`/`confirm` endpoints. Registration/login/password-reset/email-verification
+no longer go through this app's API at all (they're direct Firebase SDK calls), so they're
+governed by Firebase's own quotas/abuse protection instead. It's per-serverless-instance, not
+distributed — see [Limitations](#limitations).
 
 ## Environment Variables
 
@@ -128,15 +138,18 @@ Copy `.env.example` to `.env` and fill in the values.
 
 | Variable | Where | Purpose |
 | --- | --- | --- |
-| `DATABASE_URL` | server-only | Postgres connection string (Neon in production) |
-| `AUTH_SECRET` | server-only | Signs sessions and the gallery-password cookie |
-| `SMTP_HOST` / `SMTP_PORT` / `SMTP_SECURE` / `SMTP_USER` / `SMTP_PASSWORD` / `SMTP_FROM` | server-only | Outbound email. Optional in dev (falls back to Ethereal) |
-| `R2_ACCOUNT_ID` | server-only | Cloudflare account id — derives the R2 endpoint in production |
-| `R2_ENDPOINT` | server-only | Overrides the endpoint for local dev (e.g. MinIO) — leave blank in production |
-| `R2_ACCESS_KEY_ID` / `R2_SECRET_ACCESS_KEY` | server-only | R2 API token credentials |
-| `R2_BUCKET_NAME` | server-only | The bucket images are stored in |
-| `R2_PUBLIC_URL` | server-only | Optional public bucket domain — fast path for viewing images in **public** galleries only |
-| `NEXT_PUBLIC_APP_URL` | **client-safe** | Embedded in QR codes and email links — must be your real production domain |
+| `DATABASE_URL` | server-only | Postgres connection string (Neon in production) — gallery/image metadata only, no user data |
+| `AUTH_SECRET` | server-only | Signs the gallery-password access cookie only (unrelated to user auth, which is Firebase's) |
+| `FIREBASE_PROJECT_ID` | server-only | From your Firebase service account JSON |
+| `FIREBASE_CLIENT_EMAIL` | server-only | From your Firebase service account JSON — an auto-generated `...@<project>.iam.gserviceaccount.com` address, not a personal email |
+| `FIREBASE_PRIVATE_KEY` | server-only | From your Firebase service account JSON, pasted as-is (including `\n` sequences) |
+| `SUPABASE_S3_ENDPOINT` | server-only | The Supabase Storage S3-compatible endpoint (from Project Settings → Storage → S3 Connection). For local dev, point this at MinIO instead |
+| `SUPABASE_S3_REGION` | server-only | Region shown alongside the S3 endpoint in the Supabase dashboard |
+| `SUPABASE_S3_ACCESS_KEY_ID` / `SUPABASE_S3_SECRET_ACCESS_KEY` | server-only | S3 access key credentials created in Storage → S3 Connection (separate from your Supabase API keys) |
+| `SUPABASE_STORAGE_BUCKET` | server-only | The bucket images are stored in |
+| `SUPABASE_PUBLIC_URL` | server-only | Optional public bucket URL base — fast path for viewing images in **public** galleries only (only works if the bucket is set to Public) |
+| `NEXT_PUBLIC_APP_URL` | **client-safe** | Embedded in QR codes — must be your real production domain |
+| `NEXT_PUBLIC_FIREBASE_API_KEY` / `NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN` / `NEXT_PUBLIC_FIREBASE_PROJECT_ID` / `NEXT_PUBLIC_FIREBASE_APP_ID` / `NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID` | **client-safe** | Firebase web app config (Project Settings → General → Your apps) — safe to expose, Firebase enforces access via its own rules |
 
 Never prefix any of the server-only variables with `NEXT_PUBLIC_` — that would bundle them
 into client-side JavaScript.
@@ -172,26 +185,27 @@ Then in `.env`:
 
 ```bash
 DATABASE_URL="postgresql://postgres:postgres@localhost:5432/qr_gallery?schema=public"
-R2_ENDPOINT="http://localhost:9000"
-R2_ACCESS_KEY_ID="minioadmin"
-R2_SECRET_ACCESS_KEY="minioadmin123"
-R2_BUCKET_NAME="qr-gallery-images"
-R2_PUBLIC_URL="http://localhost:9000/qr-gallery-images"
+SUPABASE_S3_ENDPOINT="http://localhost:9000"
+SUPABASE_S3_REGION="us-east-1"
+SUPABASE_S3_ACCESS_KEY_ID="minioadmin"
+SUPABASE_S3_SECRET_ACCESS_KEY="minioadmin123"
+SUPABASE_STORAGE_BUCKET="qr-gallery-images"
+SUPABASE_PUBLIC_URL="http://localhost:9000/qr-gallery-images"
 ```
 
-MinIO speaks the same S3 API R2 does, so everything — presigned uploads, signed downloads,
-the ZIP streaming — works identically to production, just pointed at a local container. This
-is genuinely how the upload/download/delete flow in this app was verified.
+MinIO speaks the same S3 API Supabase Storage does, so everything — presigned uploads, signed
+downloads, the ZIP streaming — works identically to production, just pointed at a local
+container.
 
 > If port `5432` is already taken by another local Postgres install, map to a free port
 > instead (e.g. `-p 5433:5432`) and update `DATABASE_URL` accordingly.
 
-**Option B — Neon + real R2, no Docker at all**
+**Option B — Neon + real Supabase Storage, no Docker at all**
 
-Just point `DATABASE_URL` at a free Neon database and the `R2_*` variables at a real
-Cloudflare R2 bucket (see [R2 Setup](#cloudflare-r2-setup) below, and leave `R2_ENDPOINT`
-blank so it's derived from `R2_ACCOUNT_ID`). This is the closest local setup to production
-and doesn't require Docker at all — a good option if you'd rather not run local containers.
+Just point `DATABASE_URL` at a free Neon database and the `SUPABASE_S3_*` variables at a real
+Supabase Storage bucket (see [Supabase Storage Setup](#supabase-storage-setup) below). This is
+the closest local setup to production and doesn't require Docker at all — a good option if
+you'd rather not run local containers.
 
 **Then, either way:**
 
@@ -219,22 +233,19 @@ deploy`) separately against your production database before or right after the f
 
 | Method | Route | Purpose |
 | --- | --- | --- |
-| POST | `/api/auth/register` | Create an account (also sends a verification email) — rate-limited |
-| * | `/api/auth/[...nextauth]` | Auth.js sign-in/sign-out/session handlers |
-| POST | `/api/auth/verify-email/resend` | Resend the verification email (authenticated) — rate-limited |
-| POST | `/api/auth/forgot-password` | Request a password-reset email — rate-limited |
-| POST | `/api/auth/reset-password` | Consume a reset token and set a new password — rate-limited |
+| POST | `/api/auth/session` | Exchange a Firebase ID token for an httpOnly session cookie (also used by login/register) |
+| DELETE | `/api/auth/session` | Clear the session cookie (sign out) |
 | GET/POST | `/api/galleries` | List / create galleries (owner only) |
-| GET/PATCH/DELETE | `/api/galleries/[id]` | Read / update / delete a gallery (owner only); delete also purges its R2 objects |
+| GET/PATCH/DELETE | `/api/galleries/[id]` | Read / update / delete a gallery (owner only); delete also purges its storage objects |
 | POST | `/api/galleries/[id]/images/presign` | Authorize an upload batch, return presigned PUT URLs (owner only) — rate-limited |
-| POST | `/api/galleries/[id]/images/confirm` | Finalize uploads after the browser has PUT them to R2 (owner only) — rate-limited |
+| POST | `/api/galleries/[id]/images/confirm` | Finalize uploads after the browser has PUT them to Supabase Storage (owner only) — rate-limited |
 | PATCH | `/api/galleries/[id]/images/reorder` | Persist new image order (owner only) |
 | GET | `/api/galleries/[id]/qr` | Download the gallery QR as PNG or SVG (owner only) |
 | POST | `/api/galleries/[id]/verify-password` | Verify a public gallery's password (`id` here is the gallery's slug) |
 | GET | `/api/galleries/[id]/download-all` | Stream all images as a ZIP (`id` here is the gallery's slug) |
 | GET | `/api/images/[id]` | Redirect to a viewable URL for the image (authorization-checked) |
 | GET | `/api/images/[id]/download` | Redirect to a presigned download URL with the original filename |
-| DELETE | `/api/images/[id]` | Delete an image — removes the R2 object then the DB row (owner only) |
+| DELETE | `/api/images/[id]` | Delete an image — removes the storage object then the DB row (owner only) |
 
 ## Limits
 
@@ -246,52 +257,68 @@ upload-confirm time, since gallery state can change between presign and confirm)
 - Max images per gallery: 50
 - Max total gallery size: 100 MB
 
-## Cloudflare R2 Setup
+## Supabase Storage Setup
 
-1. Sign up / log in at [dash.cloudflare.com](https://dash.cloudflare.com) — R2 is available
-   on the free plan.
-2. **R2 → Create bucket.** Name it (e.g. `qr-gallery-images`), leave default settings.
-3. **R2 → your bucket → Settings → Public Access** — optional. If you want fast, unsigned
-   viewing for *public* galleries, enable a public bucket domain (either the free `r2.dev`
-   subdomain, or a custom domain you own) and put it in `R2_PUBLIC_URL`. Private/
-   password-protected galleries never use this — they always get a short-lived signed URL
-   regardless. If you skip this, everything still works — public galleries just also use
-   signed URLs instead of the public path.
-4. **R2 → your bucket → Settings → CORS Policy — required.** Uploads happen directly from the
-   browser to R2 (a different origin than your app), so without a CORS policy the browser
-   will block the upload `PUT` request even though the presigned URL itself is valid. Add:
-   ```json
-   [
-     {
-       "AllowedOrigins": ["https://your-production-domain.com", "http://localhost:3000"],
-       "AllowedMethods": ["PUT", "GET", "HEAD"],
-       "AllowedHeaders": ["*"],
-       "ExposeHeaders": ["ETag"],
-       "MaxAgeSeconds": 3600
-     }
-   ]
-   ```
-   Replace `https://your-production-domain.com` with your real deployed domain (add your
-   Vercel preview-deployment domain too if you test uploads from preview branches). Keep the
-   `localhost:3000` entry so local development keeps working.
-5. **R2 → Manage API tokens → Create API token.** Choose "Object Read & Write", scope it to
-   your bucket. This gives you an **Access Key ID** and **Secret Access Key** — copy both
-   immediately (the secret is shown once).
-6. Your **Account ID** is shown on the R2 overview page (or any zone's overview page) in the
-   right sidebar.
+1. Sign up / log in at [supabase.com](https://supabase.com) and **create a project** — the
+   free plan covers this app.
+2. **Storage → Create bucket.** Name it (e.g. `qr-gallery-images`). Leave it **Private**
+   unless you want the optional public-URL fast path (step 5).
+3. **Project Settings → Storage → S3 Connection.** Click "Connect" and switch to the **S3**
+   tab — this gives you the S3-compatible **Endpoint** and **Region** for this project.
+4. On the same screen, **create an S3 access key** (this is separate from your Supabase API
+   keys) — it gives you an **Access Key ID** and **Secret Access Key**, copy both immediately
+   (the secret is shown once).
+5. **Optional — public viewing for public galleries.** If you want fast, unsigned viewing for
+   *public* galleries, set the bucket to **Public** (Storage → your bucket → Settings) and use
+   `https://<project-ref>.supabase.co/storage/v1/object/public/<bucket-name>` as
+   `SUPABASE_PUBLIC_URL`. Private/password-protected galleries never use this — they always
+   get a short-lived signed URL regardless. If you skip this, everything still works — public
+   galleries just also use signed URLs instead of the public path.
+6. **CORS — usually not required.** Supabase Storage's S3-compatible endpoint allows
+   cross-origin requests by default; if you hit a CORS error on upload, check Storage
+   settings in the dashboard for a CORS/allowed-origins option and add your production domain
+   plus `http://localhost:3000`.
 7. Fill in `.env` (or Vercel's environment variables):
    ```bash
-   R2_ACCOUNT_ID="<your account id>"
-   R2_ACCESS_KEY_ID="<the access key id from step 5>"
-   R2_SECRET_ACCESS_KEY="<the secret access key from step 5>"
-   R2_BUCKET_NAME="qr-gallery-images"
-   R2_PUBLIC_URL="https://<your r2.dev or custom domain>"   # optional, see step 3
+   SUPABASE_S3_ENDPOINT="<endpoint from step 3>"
+   SUPABASE_S3_REGION="<region from step 3>"
+   SUPABASE_S3_ACCESS_KEY_ID="<the access key id from step 4>"
+   SUPABASE_S3_SECRET_ACCESS_KEY="<the secret access key from step 4>"
+   SUPABASE_STORAGE_BUCKET="qr-gallery-images"
+   SUPABASE_PUBLIC_URL="https://<project-ref>.supabase.co/storage/v1/object/public/qr-gallery-images"   # optional, see step 5
    ```
-   Leave `R2_ENDPOINT` blank in production — it's derived from `R2_ACCOUNT_ID`.
 
-Free tier (subject to change — check Cloudflare's current terms): ~10 GB-month storage, 1M
-Class A ops/month, 10M Class B ops/month, and R2 has **no egress fees**, which is what makes
-serving images this way free regardless of how much a gallery gets viewed.
+Free tier (subject to change — check Supabase's current terms): **1 GB storage**, 2 GB
+egress/month, plenty for a low-volume gallery app that isn't doing bulk uploads. Unlike a
+usage-based billing plan, exceeding the free tier on a free project simply blocks new
+uploads/requests rather than generating a bill.
+
+## Firebase Authentication Setup
+
+1. Sign up / log in at [console.firebase.google.com](https://console.firebase.google.com) and
+   **create a project** — the free Spark plan covers this app.
+2. **Authentication → Get started → Sign-in method → Email/Password.** Enable it.
+3. **Project Settings → General → Your apps → Add app → Web.** Register a web app (no
+   Firebase Hosting needed). Copy the config values it shows you
+   (`apiKey`/`authDomain`/`projectId`/`appId`/`messagingSenderId`) into the
+   `NEXT_PUBLIC_FIREBASE_*` variables.
+4. **Project Settings → Service Accounts → Generate new private key.** Downloads a JSON file —
+   copy its `project_id` → `FIREBASE_PROJECT_ID`, `client_email` → `FIREBASE_CLIENT_EMAIL`,
+   and `private_key` → `FIREBASE_PRIVATE_KEY` (keep the `\n` sequences literal, in quotes).
+   **This is a different set of credentials from step 3** — the web app config is client-safe,
+   this service account is a server-only secret. Never commit that JSON file.
+5. **Authentication → Templates → set a custom Action URL — required.** By default, the
+   verification/password-reset links Firebase emails point at a generic Firebase-hosted page,
+   not this app's own `/verify-email` and `/reset-password` pages. Open each template (Email
+   address verification, Password reset), click the pencil/customize icon, and set the action
+   URL to your domain (e.g. `https://your-app.vercel.app` for production,
+   `http://localhost:3000` while testing locally — you'll need to switch it back and forth, or
+   just set it to production and test verification/reset flows against the deployed site).
+6. Fill in `.env` (or Vercel's environment variables) with the values from steps 3 and 4.
+
+Free tier (Spark plan, subject to change): 50,000 monthly active users' worth of
+Email/Password auth, which is far beyond what a small gallery app needs — this tier doesn't
+expire and isn't usage-billed.
 
 ## Neon Setup
 
@@ -317,8 +344,9 @@ after idle, which is normal and fine for an MVP).
    repo. Vercel auto-detects Next.js; no build command changes are needed
    (`next build` is correct as-is).
 3. **Configure environment variables** in the Vercel project settings — add every variable
-   from `.env.example` with real values (`DATABASE_URL` from Neon, the `R2_*` values from
-   Cloudflare, `SMTP_*` from your mail provider, a freshly generated `AUTH_SECRET`, and
+   from `.env.example` with real values (`DATABASE_URL` from Neon, the `SUPABASE_S3_*` /
+   `SUPABASE_STORAGE_BUCKET` values from Supabase, the `FIREBASE_*` and
+   `NEXT_PUBLIC_FIREBASE_*` values from Firebase, a freshly generated `AUTH_SECRET`, and
    `NEXT_PUBLIC_APP_URL` set to your **real production domain**, e.g.
    `https://your-app.vercel.app` or your custom domain — not `localhost`).
 4. **Deploy.** The build command doesn't need changes; if you want migrations to run as part
@@ -330,11 +358,12 @@ after idle, which is normal and fine for an MVP).
 6. **Run database migrations** against production, if you didn't fold it into the build
    command: `npm run db:deploy` from your machine with `DATABASE_URL` pointed at Neon (or via
    `vercel env pull` to get the production value locally first).
-7. **Verify SMTP** — register a test account on the deployed site and confirm the
-   verification email actually arrives (not just an Ethereal preview link — with real
-   `SMTP_*` vars set, `src/lib/mailer.ts` sends for real).
-8. **Verify R2** — upload an image to a test gallery and confirm it appears (check the R2
-   bucket in the Cloudflare dashboard for the new object under `galleries/<id>/`).
+7. **Verify the Firebase Action URL** — make sure step 5 of
+   [Firebase Authentication Setup](#firebase-authentication-setup) points at your real
+   deployed domain, or verification/reset emails will link to a generic Firebase page instead
+   of this app's UI.
+8. **Verify Supabase Storage** — upload an image to a test gallery and confirm it appears
+   (check the bucket in the Supabase dashboard for the new object under `galleries/<id>/`).
 9. **Test authentication** — register, verify email, log out, log back in, forgot password →
    reset → log in with the new password.
 10. **Test gallery creation** — create a public gallery and a password-protected one.
@@ -346,25 +375,6 @@ after idle, which is normal and fine for an MVP).
     session) and confirm images load, the lightbox works, and password gates work if set.
 14. **Test download** — download a single image and "Download All" as a ZIP; confirm the ZIP
     opens and filenames are preserved.
-
-## Migrating Existing BYTEA Images to R2
-
-If you're upgrading an existing deployment that stored images as PostgreSQL `BYTEA` (an
-earlier version of this app did), don't just drop that column — you'll silently lose every
-photo already uploaded. The migration is two steps:
-
-1. **Expand**: add a nullable `storageKey` column alongside the existing `data` column
-   (already the shape of `prisma/migrations/..._expand_add_storage_key`).
-2. **Backfill**: run `npm run migrate:bytea-to-r2` — reads every `Image` row with `data` but
-   no `storageKey`, uploads the bytes to R2, and sets `storageKey` (only clearing `data` after
-   a successful upload, so a failure partway through leaves affected rows retriable and
-   nothing is lost). Safe to re-run.
-3. **Contract**: once the script reports all rows migrated, apply the migration that drops
-   `data` and makes `storageKey` required (`prisma/migrations/..._contract_drop_bytea`).
-
-This repository already went through that migration for its own local dev data as part of
-building the R2 support — `scripts/migrate-bytea-to-r2.mjs` is the exact script used, not a
-placeholder.
 
 ## Limitations
 
@@ -380,17 +390,17 @@ placeholder.
 - The gallery-password session is a single HMAC-signed cookie per gallery (24h) rather than a
   server-side session table — sufficient for casual protection, not bank-grade.
 - Presigned upload URLs that are requested but never confirmed (e.g. the user closes the tab
-  mid-upload) leave an orphaned object in R2 — there's no background reconciliation job. Given
-  R2's free tier (10 GB-month) this is a non-issue at MVP scale; a scheduled cleanup job
-  (delete objects under `galleries/*` older than 24h with no matching `Image.storageKey`)
-  would be the fix if it ever matters.
+  mid-upload) leave an orphaned object in Supabase Storage — there's no background
+  reconciliation job. Given Supabase's free tier (1 GB) this is a non-issue at MVP scale; a
+  scheduled cleanup job (delete objects under `galleries/*` older than 24h with no matching
+  `Image.storageKey`) would be the fix if it ever matters.
 - No automated test suite yet — verification for this app has been manual/scripted end-to-end
-  testing (see the R2 section above) rather than a CI test suite.
+  testing (see the Vercel Deployment section above) rather than a CI test suite.
 
 ## Future Improvements
 
-- Add a scheduled job (Vercel Cron, on the free tier) to reconcile orphaned R2 objects from
-  abandoned uploads.
+- Add a scheduled job (Vercel Cron, on the free tier) to reconcile orphaned Supabase Storage
+  objects from abandoned uploads.
 - Swap the in-memory rate limiter for Upstash Redis if traffic grows enough that per-instance
   limiting becomes a real gap.
 - Gate dashboard/gallery-creation access behind a verified email.

@@ -1,20 +1,20 @@
 import { NextRequest, NextResponse } from "next/server";
 import bcrypt from "bcryptjs";
 import { db } from "@/lib/db";
-import { auth } from "@/auth";
+import { getCurrentUser } from "@/lib/session";
 import { requireGalleryOwner } from "@/lib/authorize";
 import { getOwnedGallery } from "@/lib/galleries";
 import { updateGallerySchema } from "@/lib/validations";
-import { imageStorage } from "@/lib/storage/r2-image-storage";
+import { imageStorage } from "@/lib/storage/supabase-image-storage";
 
 export async function GET(_req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
-  const session = await auth();
-  if (!session?.user) {
+  const user = await getCurrentUser();
+  if (!user) {
     return NextResponse.json({ success: false, error: "Unauthorized." }, { status: 401 });
   }
 
   const { id } = await ctx.params;
-  const gallery = await getOwnedGallery(id, session.user.id);
+  const gallery = await getOwnedGallery(id, user.id);
   if (!gallery) {
     return NextResponse.json({ success: false, error: "Gallery not found." }, { status: 404 });
   }
@@ -23,13 +23,13 @@ export async function GET(_req: NextRequest, ctx: { params: Promise<{ id: string
 }
 
 export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
-  const session = await auth();
-  if (!session?.user) {
+  const user = await getCurrentUser();
+  if (!user) {
     return NextResponse.json({ success: false, error: "Unauthorized." }, { status: 401 });
   }
 
   const { id } = await ctx.params;
-  const owned = await requireGalleryOwner(id, session.user.id);
+  const owned = await requireGalleryOwner(id, user.id);
   if (!owned) {
     return NextResponse.json(
       { success: false, error: "You don't have permission to perform this action." },
@@ -80,13 +80,13 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
 }
 
 export async function DELETE(_req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
-  const session = await auth();
-  if (!session?.user) {
+  const user = await getCurrentUser();
+  if (!user) {
     return NextResponse.json({ success: false, error: "Unauthorized." }, { status: 401 });
   }
 
   const { id } = await ctx.params;
-  const owned = await requireGalleryOwner(id, session.user.id);
+  const owned = await requireGalleryOwner(id, user.id);
   if (!owned) {
     return NextResponse.json(
       { success: false, error: "You don't have permission to perform this action." },

@@ -1,7 +1,9 @@
 "use client";
 
-import { signOut } from "next-auth/react";
+import { useRouter } from "next/navigation";
+import { signOut } from "firebase/auth";
 import { LogOut, User } from "lucide-react";
+import { getFirebaseAuth } from "@/lib/firebase/client";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -24,6 +26,15 @@ function initials(name: string) {
 }
 
 export function UserMenu({ name, email }: { name: string; email: string }) {
+  const router = useRouter();
+
+  async function handleLogout() {
+    await signOut(getFirebaseAuth()).catch(() => {});
+    await fetch("/api/auth/session", { method: "DELETE" }).catch(() => {});
+    router.push("/");
+    router.refresh();
+  }
+
   return (
     <DropdownMenu>
       <DropdownMenuTrigger
@@ -50,7 +61,7 @@ export function UserMenu({ name, email }: { name: string; email: string }) {
         <DropdownMenuSeparator />
         <DropdownMenuItem
           variant="destructive"
-          onSelect={() => signOut({ callbackUrl: "/" })}
+          onSelect={handleLogout}
         >
           <LogOut className="h-4 w-4" />
           Log out
